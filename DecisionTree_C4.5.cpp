@@ -9,6 +9,27 @@
 #include <cmath>
 using namespace std;
 
+// http://stackoverflow.com/questions/216823/whats-the-best-way-to-trim-stdstring
+
+// trim from start
+static inline std::string &ltrim(std::string &s) {
+	s.erase(s.begin(), std::find_if(s.begin(), s.end(),
+																	std::not1(std::ptr_fun<int, int>(std::isspace))));
+	return s;
+}
+
+// trim from end
+static inline std::string &rtrim(std::string &s) {
+	s.erase(std::find_if(s.rbegin(), s.rend(),
+											 std::not1(std::ptr_fun<int, int>(std::isspace))).base(), s.end());
+	return s;
+}
+
+// trim from both ends
+static inline std::string &trim(std::string &s) {
+	return ltrim(rtrim(s));
+}
+
 class MatrixCls
 {
   private:
@@ -31,8 +52,7 @@ class MatrixCls
         while(Iss.good())
         {
           getline(Iss, Item, ',');
-          Item.erase(remove(Item.begin(), Item.begin()+2, ' '), Item.begin()+2);
-          Item.erase(remove(Item.end()-1, Item.end(), ' '), Item.end());
+					trim(Item);
           Row.push_back(Item);
         }
 
