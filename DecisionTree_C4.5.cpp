@@ -451,7 +451,6 @@ double ComputeAttributeEntropyGain(MatrixCls Remain_Matrix, string The_Attribute
   		After_Entropy = After_Entropy + Temp_Entropy;
   	}
   	Gained_Entropy = Original_Entropy -  After_Entropy;
-  	return Gained_Entropy;
   }
 
   if(Kinds[Index].compare("Continuous") == 0)
@@ -460,11 +459,11 @@ double ComputeAttributeEntropyGain(MatrixCls Remain_Matrix, string The_Attribute
     double LowerLen = Parts["Lower_Scores"].size();
     double UpperLen = Parts["Upper_Scores"].size();
     double Len = LowerLen + UpperLen;
-    double After_Entropy, Gained_Entropy;
-    After_Entropy = LowerLen/Len*ComputeScoreEntropy(Parts["Lower_Scores"]) + UpperLen/Len*ComputeScoreEntropy(Parts["Upper_Scores"]);
+    double After_Entropy = LowerLen/Len*ComputeScoreEntropy(Parts["Lower_Scores"]) + UpperLen/Len*ComputeScoreEntropy(Parts["Upper_Scores"]);
     Gained_Entropy = Original_Entropy - After_Entropy;
-    return Gained_Entropy;
   }
+
+  return Gained_Entropy;
 }
 
 double GainRatio(MatrixCls Remain_Matrix, string The_Attribute, string Bisect_Node = "")
