@@ -361,7 +361,7 @@ vector < string > UniqueValues(vector < string > A_String)
 string FrequentValues(vector < string > A_String)
 {
   vector < string > Unique_Values = UniqueValues(A_String);
-  int Count[Unique_Values.size()] = {0};
+  vector < int > Count(Unique_Values.size());
   for(int i = 0; i < A_String.size(); i++)
   {
     for(int j = 0; j < Unique_Values.size(); j++)
@@ -396,7 +396,7 @@ double ComputeScoreEntropy(vector < string > Scores)
   {
     double TheEntropy = 0.;
   	int i, j;
-  	int Count[Score_Range.size()] = {0};
+  	vector< int > Count(Score_Range.size());
 
   	for(i = 0; i < Scores.size(); i++)
   	{
