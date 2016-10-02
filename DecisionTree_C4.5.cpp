@@ -5,6 +5,8 @@
 #include <vector>
 #include <map>
 #include <algorithm>
+#include <cassert>
+#include <cmath>
 using namespace std;
 
 class MatrixCls
