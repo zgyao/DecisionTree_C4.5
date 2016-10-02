@@ -203,7 +203,7 @@ class MatrixCls
       vector < string > SortedScores = SortScoreValues(The_Attribute);
       for(int i = 0; i < SortedValues.size()-1; i++)
       {
-        if(abs(stod(SortedValues[i]) - stod(SortedValues[i+1])) > 1.e-8 & SortedScores[i].compare(SortedScores[i+1]) != 0)
+        if(fabs(stod(SortedValues[i]) - stod(SortedValues[i+1])) > 1.e-8 & SortedScores[i].compare(SortedScores[i+1]) != 0)
         {
           Bisect_Nodes.push_back(to_string((stod(SortedValues[i]) + stod(SortedValues[i+1]))/2.));
         }
