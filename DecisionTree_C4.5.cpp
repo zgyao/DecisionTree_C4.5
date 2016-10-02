@@ -745,7 +745,7 @@ void DisplayVector(vector < string > The_Vector)
 
 int main(int argc, char const* argv[])
 {
-  MatrixCls Matrix("Golf.dat");
+  MatrixCls Matrix(argv[1]);
   TreeCls * Tree;
   Tree = Tree->BuildTree(Tree, Matrix);
   Tree->Display();
