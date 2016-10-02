@@ -275,7 +275,6 @@ class MatrixCls
             Row.erase(Row.begin(),Row.end());
           }
         }
-        return *this;
       }
 
       else if(Kinds[Index].compare("Continuous") == 0)
@@ -331,8 +330,9 @@ class MatrixCls
             }
           }
         }
-        return *this;
       }
+
+      return *this;
     }
 
     void Display()
