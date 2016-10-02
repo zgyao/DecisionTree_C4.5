@@ -5,7 +5,30 @@
 #include <vector>
 #include <map>
 #include <algorithm>
+#include <cassert>
+#include <cmath>
 using namespace std;
+
+// http://stackoverflow.com/questions/216823/whats-the-best-way-to-trim-stdstring
+
+// trim from start
+static inline std::string &ltrim(std::string &s) {
+	s.erase(s.begin(), std::find_if(s.begin(), s.end(),
+																	std::not1(std::ptr_fun<int, int>(std::isspace))));
+	return s;
+}
+
+// trim from end
+static inline std::string &rtrim(std::string &s) {
+	s.erase(std::find_if(s.rbegin(), s.rend(),
+											 std::not1(std::ptr_fun<int, int>(std::isspace))).base(), s.end());
+	return s;
+}
+
+// trim from both ends
+static inline std::string &trim(std::string &s) {
+	return ltrim(rtrim(s));
+}
 
 class MatrixCls
 {
@@ -22,12 +45,14 @@ class MatrixCls
       while(!Data.eof())
     	{
     		getline(Data, Line);
+
+				if (Line.empty()) break;
+
     		istringstream Iss(Line);
         while(Iss.good())
         {
           getline(Iss, Item, ',');
-          Item.erase(remove(Item.begin(), Item.begin()+2, ' '), Item.begin()+2);
-          Item.erase(remove(Item.end()-1, Item.end(), ' '), Item.end());
+					trim(Item);
           Row.push_back(Item);
         }
 
@@ -198,7 +223,7 @@ class MatrixCls
       vector < string > SortedScores = SortScoreValues(The_Attribute);
       for(int i = 0; i < SortedValues.size()-1; i++)
       {
-        if(abs(stod(SortedValues[i]) - stod(SortedValues[i+1])) > 1.e-8 & SortedScores[i].compare(SortedScores[i+1]) != 0)
+        if(fabs(stod(SortedValues[i]) - stod(SortedValues[i+1])) > 1.e-8 & SortedScores[i].compare(SortedScores[i+1]) != 0)
         {
           Bisect_Nodes.push_back(to_string((stod(SortedValues[i]) + stod(SortedValues[i+1]))/2.));
         }
@@ -272,7 +297,6 @@ class MatrixCls
             Row.erase(Row.begin(),Row.end());
           }
         }
-        return *this;
       }
 
       else if(Kinds[Index].compare("Continuous") == 0)
@@ -328,8 +352,9 @@ class MatrixCls
             }
           }
         }
-        return *this;
       }
+
+      return *this;
     }
 
     void Display()
@@ -356,7 +381,7 @@ vector < string > UniqueValues(vector < string > A_String)
 string FrequentValues(vector < string > A_String)
 {
   vector < string > Unique_Values = UniqueValues(A_String);
-  int Count[Unique_Values.size()] = {0};
+  vector < int > Count(Unique_Values.size());
   for(int i = 0; i < A_String.size(); i++)
   {
     for(int j = 0; j < Unique_Values.size(); j++)
@@ -391,7 +416,7 @@ double ComputeScoreEntropy(vector < string > Scores)
   {
     double TheEntropy = 0.;
   	int i, j;
-  	int Count[Score_Range.size()] = {0};
+  	vector< int > Count(Score_Range.size());
 
   	for(i = 0; i < Scores.size(); i++)
   	{
@@ -446,7 +471,6 @@ double ComputeAttributeEntropyGain(MatrixCls Remain_Matrix, string The_Attribute
   		After_Entropy = After_Entropy + Temp_Entropy;
   	}
   	Gained_Entropy = Original_Entropy -  After_Entropy;
-  	return Gained_Entropy;
   }
 
   if(Kinds[Index].compare("Continuous") == 0)
@@ -455,11 +479,11 @@ double ComputeAttributeEntropyGain(MatrixCls Remain_Matrix, string The_Attribute
     double LowerLen = Parts["Lower_Scores"].size();
     double UpperLen = Parts["Upper_Scores"].size();
     double Len = LowerLen + UpperLen;
-    double After_Entropy, Gained_Entropy;
-    After_Entropy = LowerLen/Len*ComputeScoreEntropy(Parts["Lower_Scores"]) + UpperLen/Len*ComputeScoreEntropy(Parts["Upper_Scores"]);
+    double After_Entropy = LowerLen/Len*ComputeScoreEntropy(Parts["Lower_Scores"]) + UpperLen/Len*ComputeScoreEntropy(Parts["Upper_Scores"]);
     Gained_Entropy = Original_Entropy - After_Entropy;
-    return Gained_Entropy;
   }
+
+  return Gained_Entropy;
 }
 
 double GainRatio(MatrixCls Remain_Matrix, string The_Attribute, string Bisect_Node = "")
@@ -557,6 +581,8 @@ string TreeCls::Temp_TestTree(vector < string > Kinds, vector < string > Attribu
       }
     }
   }
+
+  assert(false);
 }
 
 vector < string > TreeCls::TestTree(MatrixCls Data_Matrix)
@@ -640,7 +666,7 @@ TreeCls * TreeCls::BuildTree(TreeCls * Tree, MatrixCls Remain_Matrix)
           Max_Bisect_Node = Bisect_Nodes[j];
         }
       }
-      Temp_Gain_Ratio = GainRatio(Remain_Matrix,Attributes[i], Max_Bisect_Node);
+      Temp_Gain_Ratio = Max_Bisect_Node.empty() ? 0 : GainRatio(Remain_Matrix,Attributes[i], Max_Bisect_Node);
     }
 
     if(Temp_Gain_Ratio - Gain_Ratio > 1.e-8)
@@ -717,9 +743,9 @@ void DisplayVector(vector < string > The_Vector)
   cout << endl;
 }
 
-int main()
+int main(int argc, char const* argv[])
 {
-  MatrixCls Matrix("Golf.dat");
+  MatrixCls Matrix(argv[1]);
   TreeCls * Tree;
   Tree = Tree->BuildTree(Tree, Matrix);
   Tree->Display();

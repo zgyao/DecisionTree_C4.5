@@ -1,0 +1,11 @@
+# CLion
+.idea/
+
+# CMake
+CMakeCache.txt
+CMakeFiles
+cmake_install.cmake
+Makefile
+
+# Build output
+DecisionTree_C4.5
