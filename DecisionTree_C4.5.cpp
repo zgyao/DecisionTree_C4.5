@@ -724,7 +724,7 @@ void DisplayVector(vector < string > The_Vector)
   cout << endl;
 }
 
-int main()
+int main(int argc, char const* argv[])
 {
   MatrixCls Matrix("Golf.dat");
   TreeCls * Tree;
