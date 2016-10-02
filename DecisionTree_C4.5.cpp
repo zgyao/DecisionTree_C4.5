@@ -666,7 +666,7 @@ TreeCls * TreeCls::BuildTree(TreeCls * Tree, MatrixCls Remain_Matrix)
           Max_Bisect_Node = Bisect_Nodes[j];
         }
       }
-      Temp_Gain_Ratio = GainRatio(Remain_Matrix,Attributes[i], Max_Bisect_Node);
+      Temp_Gain_Ratio = Max_Bisect_Node.empty() ? 0 : GainRatio(Remain_Matrix,Attributes[i], Max_Bisect_Node);
     }
 
     if(Temp_Gain_Ratio - Gain_Ratio > 1.e-8)
