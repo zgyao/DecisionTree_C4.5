@@ -562,6 +562,8 @@ string TreeCls::Temp_TestTree(vector < string > Kinds, vector < string > Attribu
       }
     }
   }
+
+  assert(false);
 }
 
 vector < string > TreeCls::TestTree(MatrixCls Data_Matrix)
