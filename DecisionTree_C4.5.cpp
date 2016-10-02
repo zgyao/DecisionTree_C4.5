@@ -22,6 +22,9 @@ class MatrixCls
       while(!Data.eof())
     	{
     		getline(Data, Line);
+
+				if (Line.empty()) break;
+
     		istringstream Iss(Line);
         while(Iss.good())
         {
