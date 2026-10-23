@@ -1,733 +1,919 @@
-#include <iostream>
-#include <fstream>
-#include <string>
-#include <sstream>
-#include <vector>
-#include <map>
+// C++20 教学示例：数据读取 → 分裂选择 → 建树 → 剪枝 → 预测。
+// main 和单机评测放在文件末尾；tests.cpp 复用本文件检查算法。
 #include <algorithm>
-using namespace std;
+#include <chrono>
+#include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <iomanip>
+#include <iostream>
+#include <limits>
+#include <map>
+#include <memory>
+#include <numeric>
+#include <optional>
+#include <ostream>
+#include <random>
+#include <span>
+#include <sstream>
+#include <stdexcept>
+#include <string>
+#include <utility>
+#include <variant>
+#include <vector>
 
-class MatrixCls
-{
-  private:
-    vector < vector < string > > Matrix;
-  public:
-    MatrixCls(string Data_File)
-    {
-      Matrix.erase(Matrix.begin(),Matrix.end());
-      ifstream Data(Data_File);
-      string Line;
-      string Item;
-      vector < string > Row;
-      while(!Data.eof())
-    	{
-    		getline(Data, Line);
-    		istringstream Iss(Line);
-        while(Iss.good())
-        {
-          getline(Iss, Item, ',');
-          Item.erase(remove(Item.begin(), Item.begin()+2, ' '), Item.begin()+2);
-          Item.erase(remove(Item.end()-1, Item.end(), ' '), Item.end());
-          Row.push_back(Item);
+namespace c45 {
+
+// 1. 数据格式与读取
+
+enum class Kind { continuous, discrete };
+using Cell = std::variant<std::monostate, double, std::string>; // monostate 表示缺失值
+
+struct Feature {
+    std::string name;
+    Kind kind;
+};
+
+struct Sample {
+    std::vector<Cell> values;
+    std::size_t label;
+};
+
+struct Dataset {
+    std::vector<Feature> features;
+    std::vector<std::string> labels;
+    std::vector<Sample> rows;
+};
+
+std::string trim(const std::string &text) {
+    const auto first = text.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos) {
+        return {};
+    }
+    return text.substr(first, text.find_last_not_of(" \t\r\n") - first + 1);
+}
+
+// 输入采用简单的逗号分隔格式；带引号的字段需要先转换。
+std::vector<std::string> split_fields(const std::string &line) {
+    if (line.find('"') != std::string::npos) {
+        throw std::invalid_argument("quoted CSV fields are not supported");
+    }
+    std::vector<std::string> result;
+    std::size_t begin = 0;
+    for (;;) {
+        const auto end = line.find(',', begin);
+        result.push_back(trim(line.substr(begin, end - begin)));
+        if (end == std::string::npos) {
+            return result;
         }
-
-    		if(Line.length())
-    		{
-    			Matrix.push_back(Row);
-    			Row.erase(Row.begin(),Row.end());
-    		}
-    	}
-      Data.close();
+        begin = end + 1;
     }
+}
 
-    MatrixCls(){ };
-    ~MatrixCls(){ };
+// 两行表头：类型、列名。空行忽略，特征中的 ? 或空字段表示缺失。
+Dataset read_dataset(std::istream &input) {
+    Dataset data;
+    std::vector<std::string> types;
+    std::string line;
+    std::size_t line_number = 0;
+    std::size_t header_rows = 0;
 
-    string Element(int i,int j)
-    {
-      return Matrix[i][j];
-    }
-
-    int SizeX()
-    {
-      return Matrix[0].size();
-    }
-
-    int SizeY()
-    {
-      return Matrix.size();
-    }
-
-    vector < string > GetVarKinds()
-    {
-      vector < string > Kinds;
-      int j;
-      for(j = 0; j < SizeX()-1; j++)
-      {
-          Kinds.push_back(Matrix[0][j]);
-      }
-      return Kinds;
-    }
-
-    vector < string > GetAttributes()
-    {
-      vector < string > Attributes;
-      int j;
-      for(j = 0; j < SizeX()-1; j++)
-      {
-          Attributes.push_back(Matrix[1][j]);
-      }
-      return Attributes;
-    }
-
-    vector < string > GetScores()
-    {
-      vector < string > Scores;
-      for(int i = 2; i < SizeY(); i++)
-      {
-        Scores.push_back(Matrix[i][SizeX()-1]);
-      }
-      return Scores;
-    }
-
-    int GetAttributeIndex(string The_Attribute)
-    {
-      {
-        int Index = 0;
-        for(int j = 0; j < SizeX(); j++)
-        {
-          if(Matrix[1][j].compare(The_Attribute) == 0)
-          {
-            Index = j;
-            break;
-          }
+    while (std::getline(input, line)) {
+        ++line_number;
+        if (trim(line).empty()) {
+            continue;
         }
-        return Index;
-      }
-    }
+        try {
+            const auto cells = split_fields(line);
 
-    vector < string > GetAttributeValues(string The_Attribute)
-    {
-      vector < string > Values;
-      int Index = GetAttributeIndex(The_Attribute);
-      for(int i = 2; i < SizeY(); i++)
-      {
-        Values.push_back(Matrix[i][Index]);
-      }
-      return Values;
-    }
-
-    vector < string > GetUniqueAttributeValues(string The_Attribute)
-    {
-      vector < string > Values = GetAttributeValues(The_Attribute);
-      sort(Values.begin(), Values.end());
-    	Values.erase(unique(Values.begin(), Values.end()), Values.end());
-      return Values;
-    }
-
-    map < string, vector < string > > GetAttributeValuesScores(string The_Attribute)
-    {
-      int i,k;
-      int Index = GetAttributeIndex(The_Attribute);
-      map < string, vector < string > > Attribute_Values_Scores;
-      vector < string > Attribute_Values = GetUniqueAttributeValues(The_Attribute);
-      vector < string > Row;
-      for(k = 0; k < Attribute_Values.size(); k++)
-      {
-        for(i = 2; i < SizeY(); i++)
-        {
-          if(Matrix[i][Index].compare(Attribute_Values[k]) == 0)
-          {
-            Row.push_back(Matrix[i][SizeX()-1]);
-          }
-        }
-        Attribute_Values_Scores[Attribute_Values[k]] = Row;
-        Row.erase(Row.begin(),Row.end());
-      }
-      return Attribute_Values_Scores;
-    }
-
-    vector < string > SortAttributeValues(string The_Attribute)
-    {
-      vector < string > Values = GetAttributeValues(The_Attribute);
-      string Temp;
-      for(int i = 0; i < Values.size()-1; i++)
-      {
-        for(int j = i+1; j < Values.size(); j++)
-        {
-          if(stod(Values[i]) - stod(Values[j]) > 1.e-8)
-          {
-            Temp = Values[i];
-            Values[i] = Values[j];
-            Values[j] = Temp;
-          }
-        }
-      }
-      return Values;
-    }
-
-    vector < string > SortScoreValues(string The_Attribute)
-    {
-      vector < string > Values = GetAttributeValues(The_Attribute);
-      vector < string > Scores = GetScores();
-      string Temp;
-
-      for(int i = 0; i < Values.size()-1; i++)
-      {
-        for(int j = i+1; j < Values.size(); j++)
-        {
-          if(stod(Values[i]) - stod(Values[j]) > 1.e-8)
-          {
-            Temp = Values[i];
-            Values[i] = Values[j];
-            Values[j] = Temp;
-
-            Temp = Scores[i];
-            Scores[i] = Scores[j];
-            Scores[j] = Temp;
-          }
-        }
-      }
-      return Scores;
-    }
-
-    vector < string > GetBisectNodes(string The_Attribute)
-    {
-      vector < string > Bisect_Nodes;
-      vector < string > SortedValues = SortAttributeValues(The_Attribute);
-      vector < string > SortedScores = SortScoreValues(The_Attribute);
-      for(int i = 0; i < SortedValues.size()-1; i++)
-      {
-        if(abs(stod(SortedValues[i]) - stod(SortedValues[i+1])) > 1.e-8 & SortedScores[i].compare(SortedScores[i+1]) != 0)
-        {
-          Bisect_Nodes.push_back(to_string((stod(SortedValues[i]) + stod(SortedValues[i+1]))/2.));
-        }
-      }
-      return Bisect_Nodes;
-    }
-
-    map < string, vector < string > > GetAttributeBisectParts(string The_Attribute, string Bisect_Node)
-    {
-      map < string, vector < string > > Bisect_Parts;
-      vector < string > SortedValues = SortAttributeValues(The_Attribute);
-      vector < string > SortedScores = SortScoreValues(The_Attribute);
-      vector < string > Row_1, Row_2, Row_3, Row_4;
-      for(int i = 0; i < SortedValues.size(); i++)
-      {
-        if(stod(SortedValues[i]) - stod(Bisect_Node) < -1.e-8)
-        {
-          Row_1.push_back(SortedScores[i]);
-          Row_3.push_back(SortedValues[i]);
-        }else{
-          Row_2.push_back(SortedScores[i]);
-          Row_4.push_back(SortedValues[i]);
-        }
-      }
-      Bisect_Parts["Lower_Scores"] = Row_1;
-      Bisect_Parts["Upper_Scores"] = Row_2;
-      Bisect_Parts["Lower_Values"] = Row_3;
-      Bisect_Parts["Upper_Values"] = Row_4;
-      return Bisect_Parts;
-    }
-
-    MatrixCls operator()(MatrixCls A_Matrix, string The_Attribute, string The_Value, string Bisect_Node = "")
-    {
-      Matrix.erase(Matrix.begin(),Matrix.end());
-      int i, j;
-      int Index = A_Matrix.GetAttributeIndex(The_Attribute);
-      vector < string > Kinds = A_Matrix.GetVarKinds();
-      vector < string > Row;
-
-      if(Kinds[Index].compare("Discrete") == 0)
-      {
-        for(i = 0; i < 2; i++)
-        {
-          for(j = 0; j < A_Matrix.SizeX(); j++)
-          {
-            if(A_Matrix.Element(1,j).compare(The_Attribute) != 0)
-            {
-              Row.push_back(A_Matrix.Element(i,j));
+            // 第一行声明类型，最后一列是类别。
+            if (header_rows == 0) {
+                if (cells.size() < 2 || cells.back() != "Discrete") {
+                    throw std::invalid_argument("need feature columns and a Discrete class column");
+                }
+                for (const auto &type : cells) {
+                    if (type != "Continuous" && type != "Discrete") {
+                        throw std::invalid_argument("unknown column type: " + type);
+                    }
+                }
+                types = cells;
+                ++header_rows;
+                continue;
             }
-          }
-          if(Row.size() != 0)
-          {
-            Matrix.push_back(Row);
-            Row.erase(Row.begin(),Row.end());
-          }
-        }
-
-        for(i = 2; i < A_Matrix.SizeY(); i++)
-        {
-          for(j = 0; j < A_Matrix.SizeX(); j++)
-          {
-            if(A_Matrix.Element(1,j).compare(The_Attribute) != 0 & A_Matrix.Element(i,Index).compare(The_Value) == 0)
-            {
-              Row.push_back(A_Matrix.Element(i,j));
-            }
-          }
-
-          if(Row.size() != 0)
-          {
-            Matrix.push_back(Row);
-            Row.erase(Row.begin(),Row.end());
-          }
-        }
-        return *this;
-      }
-
-      else if(Kinds[Index].compare("Continuous") == 0)
-      {
-        for(i = 0; i < 2; i++)
-        {
-          for(j = 0; j < A_Matrix.SizeX(); j++)
-          {
-            Row.push_back(A_Matrix.Element(i,j));
-          }
-          if(Row.size() != 0)
-          {
-            Matrix.push_back(Row);
-            Row.erase(Row.begin(),Row.end());
-          }
-        }
-
-        if(The_Value.compare("Lower_Values") == 0)
-        {
-          for(i = 2; i < A_Matrix.SizeY(); i++)
-          {
-            for(j = 0; j < A_Matrix.SizeX(); j++)
-            {
-              if(stod(A_Matrix.Element(i,Index)) -stod(Bisect_Node) < -1.e-8)
-              {
-                Row.push_back(A_Matrix.Element(i,j));
-              }
+            if (cells.size() != types.size()) {
+                throw std::invalid_argument("column count does not match schema");
             }
 
-            if(Row.size() != 0)
-            {
-              Matrix.push_back(Row);
-              Row.erase(Row.begin(),Row.end());
-            }
-          }
-        }
-        else if(The_Value.compare("Upper_Values") == 0)
-        {
-          for(i = 2; i < A_Matrix.SizeY(); i++)
-          {
-            for(j = 0; j < A_Matrix.SizeX(); j++)
-            {
-              if(stod(A_Matrix.Element(i,Index)) - stod(Bisect_Node) > 1.e-8)
-              {
-                Row.push_back(A_Matrix.Element(i,j));
-              }
+            // 第二行声明列名；重名会让打印出的决策规则产生歧义。
+            if (header_rows == 1) {
+                for (std::size_t j = 0; j < cells.size(); ++j) {
+                    const auto previous_end = cells.begin() + static_cast<std::ptrdiff_t>(j);
+                    const bool duplicate =
+                        std::find(cells.begin(), previous_end, cells[j]) != previous_end;
+                    if (cells[j].empty() || duplicate) {
+                        throw std::invalid_argument("column names must be nonempty and unique");
+                    }
+                    if (j + 1 < cells.size()) {
+                        const Kind kind =
+                            types[j] == "Continuous" ? Kind::continuous : Kind::discrete;
+                        data.features.push_back({cells[j], kind});
+                    }
+                }
+                ++header_rows;
+                continue;
             }
 
-            if(Row.size() != 0)
-            {
-              Matrix.push_back(Row);
-              Row.erase(Row.begin(),Row.end());
+            // 后续每行是一条样本。数值在这里解析一次，建树时直接使用。
+            Sample row;
+            for (std::size_t j = 0; j < data.features.size(); ++j) {
+                if (cells[j].empty() || cells[j] == "?") {
+                    row.values.emplace_back(std::monostate{});
+                } else if (data.features[j].kind == Kind::discrete) {
+                    row.values.emplace_back(cells[j]);
+                } else {
+                    std::size_t consumed = 0;
+                    const double value = std::stod(cells[j], &consumed);
+                    if (consumed != cells[j].size() || !std::isfinite(value)) {
+                        throw std::invalid_argument("numeric feature must be a finite number");
+                    }
+                    row.values.emplace_back(value);
+                }
             }
-          }
+            if (cells.back().empty() || cells.back() == "?") {
+                throw std::invalid_argument("class label must not be missing");
+            }
+            const auto found = std::find(data.labels.begin(), data.labels.end(), cells.back());
+            row.label = static_cast<std::size_t>(found - data.labels.begin());
+            if (found == data.labels.end()) {
+                data.labels.push_back(cells.back());
+            }
+            data.rows.push_back(std::move(row));
+        } catch (const std::exception &error) {
+            throw std::invalid_argument("line " + std::to_string(line_number) + ": " +
+                                        error.what());
         }
-        return *this;
-      }
     }
+    if (input.bad()) {
+        throw std::runtime_error("failed while reading dataset");
+    }
+    if (data.rows.empty()) {
+        throw std::invalid_argument("dataset has no samples");
+    }
+    return data;
+}
 
-    void Display()
-    {
-      int i, j;
-      for(i = 0; i < Matrix.size(); i++)
-      {
-        for(j = 0; j < Matrix[0].size(); j++)
-        {
-            cout  << Matrix[i][j] << "    \t";
+Dataset load_dataset(const std::string &path) {
+    std::ifstream file(path);
+    if (!file) {
+        throw std::runtime_error("cannot open dataset: " + path);
+    }
+    return read_dataset(file);
+}
+
+// 2. 分裂、建树、剪枝与预测
+double entropy(std::span<const double> counts) {
+    const double total = std::accumulate(counts.begin(), counts.end(), 0.0);
+    if (total <= 0.0) {
+        return 0.0;
+    }
+    double result = 0.0;
+    for (double count : counts) {
+        if (count <= 0.0) {
+            continue;
         }
-        cout << endl;
-      }
+        const double p = count / total;
+        result -= p * std::log2(p);
+    }
+    return result;
+}
+
+struct Options {
+    double min_leaf_weight = 2.0;
+    std::size_t max_depth = 64; // 限制递归深度与缺失值的分支扩张
+    bool mdl_correction = true; // 对搜索多个数值阈值进行惩罚
+    bool pruning = true;
+    double confidence = 0.25; // 越小，剪枝时的错误估计越保守
+};
+
+struct Node {
+    std::vector<double> counts;         // 各类别的训练权重，允许分数
+    std::optional<std::size_t> feature; // 无分裂特征时是叶子节点
+    double threshold = 0.0;
+    std::vector<std::string> categories; // 离散分支的有序取值；连续分裂时为空
+    std::vector<double> priors;          // 已知特征值中的分支比例，与 children 顺序一致
+    std::vector<std::unique_ptr<Node>> children;
+
+    [[nodiscard]] bool is_leaf() const {
+        return !feature.has_value();
     }
 };
 
-vector < string > UniqueValues(vector < string > A_String)
-{
-  sort(A_String.begin(), A_String.end());
-	A_String.erase(unique(A_String.begin(), A_String.end()), A_String.end());
-  return A_String;
-}
-
-string FrequentValues(vector < string > A_String)
-{
-  vector < string > Unique_Values = UniqueValues(A_String);
-  int Count[Unique_Values.size()] = {0};
-  for(int i = 0; i < A_String.size(); i++)
-  {
-    for(int j = 0; j < Unique_Values.size(); j++)
-    {
-      if(A_String[i].compare(Unique_Values[j]) == 0)
-      {
-        Count[j] = Count[j] + 1;
-      }
+class DecisionTree {
+public:
+    explicit DecisionTree(Options options = {}) : options_(options) {
+        if (!std::isfinite(options.min_leaf_weight) || options.min_leaf_weight < 1.0 ||
+            options.max_depth > 256 || !std::isfinite(options.confidence) ||
+            options.confidence < 1e-6 || options.confidence > 0.5) {
+            throw std::invalid_argument(
+                "invalid tree options (weight >= 1, depth <= 256, confidence in [1e-6, .5])");
+        }
     }
-  }
 
-  int Max_Count = 0, Max_Index;
-  for(int i = 0; i < Unique_Values.size(); i++)
-  {
-    if(Count[i] > Max_Count)
-    {
-      Max_Count = Count[i];
-      Max_Index = i;
+    void fit(const Dataset &data) {
+        std::vector<std::size_t> indices(data.rows.size());
+        std::iota(indices.begin(), indices.end(), 0);
+        fit(data, indices);
     }
-  }
-  return Unique_Values[Max_Index];
-}
 
-double ComputeScoreEntropy(vector < string > Scores)
-{
-  vector < string > Score_Range = UniqueValues(Scores);
-  if(Score_Range.size() == 0)
-  {
-    return 0.;
-  }
-  else
-  {
-    double TheEntropy = 0.;
-  	int i, j;
-  	int Count[Score_Range.size()] = {0};
+    // 指定训练行，保证交叉验证的测试行不参与分裂选择或剪枝。
+    void fit(const Dataset &data, std::span<const std::size_t> indices) {
+        if (data.features.empty() || data.labels.empty() || indices.empty()) {
+            throw std::invalid_argument(
+                "training set, features and class vocabulary must be nonempty");
+        }
+        std::vector<bool> seen(data.rows.size(), false);
+        std::vector<WeightedRow> rows;
+        rows.reserve(indices.size());
+        for (auto index : indices) {
+            if (index >= data.rows.size() || seen[index]) {
+                throw std::invalid_argument("training indices must be unique and in range");
+            }
+            seen[index] = true;
+            validate_values(data.rows[index].values, data.features);
+            if (data.rows[index].label >= data.labels.size()) {
+                throw std::invalid_argument("class index out of range");
+            }
+            rows.push_back({index, 1.0});
+        }
+        // 新树建好后再替换旧树，非法输入不会破坏已训练的模型。
+        auto root = build(data, rows, std::vector<bool>(data.features.size(), true), 0);
+        if (options_.pruning) {
+            prune(*root);
+        }
+        features_ = data.features;
+        labels_ = data.labels;
+        root_ = std::move(root);
+    }
 
-  	for(i = 0; i < Scores.size(); i++)
-  	{
-  		for(j = 0; j < Score_Range.size(); j++)
-  		{
-  			if(Scores[i].compare(Score_Range[j]) == 0)
-  			{
-  				Count[j] = Count[j] + 1;
-  			}
-  		}
-  	}
+    [[nodiscard]] std::vector<double> predict_proba(std::span<const Cell> values) const {
+        require_fitted();
+        validate_values(values, features_);
+        return predict_at(*root_, values);
+    }
 
-  	double Temp_Entropy;
-  	double Temp_P;
-  	for(j = 0; j < Score_Range.size(); j++)
-  	{
-  		Temp_P = (double)Count[j]/(double)(Scores.size());
-  		Temp_Entropy = -Temp_P*log(Temp_P)/log(2.);
-  		TheEntropy = TheEntropy + Temp_Entropy;
-  	}
-  	return TheEntropy;
-  }
-}
+    [[nodiscard]] std::size_t predict(std::span<const Cell> values) const {
+        const auto probabilities = predict_proba(values);
+        const auto best = std::max_element(probabilities.begin(), probabilities.end());
+        return static_cast<std::size_t>(best - probabilities.begin());
+    }
 
-double ComputeAttributeEntropy(MatrixCls Remain_Matrix, string The_Attribute)
-{
-  vector < string > Values = Remain_Matrix.GetAttributeValues(The_Attribute);
-  return ComputeScoreEntropy(Values);
-}
+    [[nodiscard]] const Node &root() const {
+        require_fitted();
+        return *root_;
+    }
 
-double ComputeAttributeEntropyGain(MatrixCls Remain_Matrix, string The_Attribute, string Bisect_Node = "")
-{
-  int Index = Remain_Matrix.GetAttributeIndex(The_Attribute);
-  vector < string > Kinds = Remain_Matrix.GetVarKinds();
-  double Original_Entropy = 0., Gained_Entropy = 0.;
-  vector < string > Scores = Remain_Matrix.GetScores();
-  Original_Entropy = ComputeScoreEntropy(Scores);
+    [[nodiscard]] const std::vector<std::string> &labels() const {
+        require_fitted();
+        return labels_;
+    }
 
-  if(Kinds[Index].compare("Discrete") == 0)
-  {
-    map < string, vector < string > > Values_Scores = Remain_Matrix.GetAttributeValuesScores(The_Attribute);
-    vector < string > Values = Remain_Matrix.GetUniqueAttributeValues(The_Attribute);
+    void print(std::ostream &out) const {
+        require_fitted();
+        print_node(out, *root_, "");
+    }
 
-  	double After_Entropy = 0.;
-  	double Temp_Entropy;
-  	vector < string > Temp_Scores;
-  	int i,j;
-  	for(i = 0; i < Values.size(); i++)
-  	{
-  		Temp_Scores = Values_Scores[Values[i]];
-  		Temp_Entropy = ComputeScoreEntropy(Temp_Scores)*(double)Temp_Scores.size()/(double)Scores.size();
-  		After_Entropy = After_Entropy + Temp_Entropy;
-  	}
-  	Gained_Entropy = Original_Entropy -  After_Entropy;
-  	return Gained_Entropy;
-  }
+private:
+    static constexpr double epsilon = 1e-12;
 
-  if(Kinds[Index].compare("Continuous") == 0)
-  {
-    map < string, vector < string > > Parts = Remain_Matrix.GetAttributeBisectParts(The_Attribute,Bisect_Node);
-    double LowerLen = Parts["Lower_Scores"].size();
-    double UpperLen = Parts["Upper_Scores"].size();
-    double Len = LowerLen + UpperLen;
-    double After_Entropy, Gained_Entropy;
-    After_Entropy = LowerLen/Len*ComputeScoreEntropy(Parts["Lower_Scores"]) + UpperLen/Len*ComputeScoreEntropy(Parts["Upper_Scores"]);
-    Gained_Entropy = Original_Entropy - After_Entropy;
-    return Gained_Entropy;
-  }
-}
+    struct WeightedRow {
+        std::size_t index;
+        double weight;
+    };
 
-double GainRatio(MatrixCls Remain_Matrix, string The_Attribute, string Bisect_Node = "")
-{
-  double Attribute_Entropy = ComputeAttributeEntropy(Remain_Matrix, The_Attribute);
-  double Attribute_Entropy_Gain = ComputeAttributeEntropyGain(Remain_Matrix, The_Attribute, Bisect_Node);
-  return Attribute_Entropy_Gain/Attribute_Entropy;
-}
+    struct Split {
+        std::size_t feature = 0;
+        double threshold = 0.0;
+        double gain = 0.0;
+        double split_info = 0.0;
+        std::vector<std::string> categories;
+        std::vector<double> weights;
+    };
 
-class TreeCls
-{
-  public:
-    string Node;
-    string Branch;
-    vector < TreeCls * > Child;
-    TreeCls();
-    TreeCls * BuildTree(TreeCls * Tree, MatrixCls Remain_Matrix);
-    void Display(int Depth);
-    string Temp_TestTree(vector < string > Kinds, vector < string > Attributes, vector < string > Value, vector < string > Score_Range);
-    vector < string > TestTree(MatrixCls Data_Matrix);
+    Options options_;
+    std::vector<Feature> features_;
+    std::vector<std::string> labels_;
+    std::unique_ptr<Node> root_;
+
+    void require_fitted() const {
+        if (!root_) {
+            throw std::logic_error("fit the tree before prediction or inspection");
+        }
+    }
+
+    static void validate_values(std::span<const Cell> values,
+                                const std::vector<Feature> &features) {
+        if (values.size() != features.size()) {
+            throw std::invalid_argument("feature count mismatch");
+        }
+        for (std::size_t j = 0; j < values.size(); ++j) {
+            if (std::holds_alternative<std::monostate>(values[j])) {
+                continue;
+            }
+            if (features[j].kind == Kind::continuous) {
+                const auto *number = std::get_if<double>(&values[j]);
+                if (!number || !std::isfinite(*number)) {
+                    throw std::invalid_argument("expected a finite numeric feature");
+                }
+            } else if (!std::holds_alternative<std::string>(values[j])) {
+                throw std::invalid_argument("expected a categorical feature");
+            }
+        }
+    }
+
+    static double total(std::span<const double> counts) {
+        return std::accumulate(counts.begin(), counts.end(), 0.0);
+    }
+
+    // SplitInfo 按分裂后的分支计算。连续特征使用左右两组，
+    // 不能按原始数值各出现几次来算；另加入缺失值组的权重。
+    static double split_information(const std::vector<double> &weights, double missing) {
+        auto groups = weights;
+        if (missing > epsilon) {
+            groups.push_back(missing);
+        }
+        return entropy(groups);
+    }
+
+    Split discrete_split(const Dataset &data, const std::vector<WeightedRow> &rows,
+                         std::size_t feature, double weight) const {
+        std::map<std::string, std::vector<double>> groups;
+        std::vector<double> known_counts(data.labels.size(), 0.0);
+        for (const auto &row : rows) {
+            const auto &sample = data.rows[row.index];
+            if (const auto *value = std::get_if<std::string>(&sample.values[feature])) {
+                auto &counts = groups.try_emplace(*value, data.labels.size(), 0.0).first->second;
+                counts[sample.label] += row.weight;
+                known_counts[sample.label] += row.weight;
+            }
+        }
+        Split split;
+        split.feature = feature;
+        const double known = total(known_counts);
+        if (known <= epsilon || groups.size() < 2) {
+            return split;
+        }
+        double after = 0.0;
+        std::size_t substantial_branches = 0;
+        for (const auto &[category, counts] : groups) {
+            const double branch_weight = total(counts);
+            split.categories.push_back(category);
+            split.weights.push_back(branch_weight);
+            after += branch_weight / known * entropy(counts);
+            if (branch_weight + epsilon >= options_.min_leaf_weight) {
+                ++substantial_branches;
+            }
+        }
+        // 至少两个分支达到最小权重，其他稀有类别可以有更小的分支。
+        if (substantial_branches < 2) {
+            return Split{};
+        }
+        split.gain = (known / weight) * (entropy(known_counts) - after);
+        split.split_info = split_information(split.weights, weight - known);
+        return split;
+    }
+
+    Split continuous_split(const Dataset &data, const std::vector<WeightedRow> &rows,
+                           std::size_t feature, double weight) const {
+        struct Entry {
+            double value;
+            double weight;
+            std::size_t label;
+        };
+
+        std::vector<Entry> sorted;
+        std::vector<double> right(data.labels.size(), 0.0);
+        std::vector<double> left(data.labels.size(), 0.0);
+        for (const auto &row : rows) {
+            const auto &sample = data.rows[row.index];
+            if (const auto *value = std::get_if<double>(&sample.values[feature])) {
+                sorted.push_back({*value, row.weight, sample.label});
+                right[sample.label] += row.weight;
+            }
+        }
+        std::stable_sort(sorted.begin(), sorted.end(),
+                         [](const Entry &a, const Entry &b) { return a.value < b.value; });
+        Split best;
+        best.feature = feature;
+        const double known = total(right);
+        const double before = entropy(right);
+        double left_weight = 0.0;
+        double best_raw_gain = -1.0;
+        std::size_t candidates = 0;
+        // 从左到右移动样本，一次扫描更新两侧类别计数。相同取值不拆开。
+        for (std::size_t i = 0; i + 1 < sorted.size(); ++i) {
+            left[sorted[i].label] += sorted[i].weight;
+            right[sorted[i].label] -= sorted[i].weight;
+            left_weight += sorted[i].weight;
+            const double right_weight = known - left_weight;
+            if (sorted[i].value == sorted[i + 1].value ||
+                left_weight + epsilon < options_.min_leaf_weight ||
+                right_weight + epsilon < options_.min_leaf_weight) {
+                continue;
+            }
+            ++candidates;
+            const double gain = before - left_weight / known * entropy(left) -
+                                right_weight / known * entropy(right);
+            if (gain > best_raw_gain + epsilon) {
+                best_raw_gain = gain;
+                // midpoint 避免溢出；若中点舍入到右端点，改用左端点。
+                best.threshold = std::midpoint(sorted[i].value, sorted[i + 1].value);
+                if (best.threshold >= sorted[i + 1].value) {
+                    best.threshold = sorted[i].value;
+                }
+                best.weights = {left_weight, right_weight};
+            }
+        }
+        if (candidates == 0) {
+            return best;
+        }
+        const double penalty =
+            options_.mdl_correction ? std::log2(static_cast<double>(candidates)) / known : 0.0;
+        best.gain = (known / weight) * (best_raw_gain - penalty);
+        best.split_info = split_information(best.weights, weight - known);
+        return best;
+    }
+
+    std::optional<Split> find_split(const Dataset &data, const std::vector<WeightedRow> &rows,
+                                    const std::vector<bool> &available, double weight) const {
+        std::vector<Split> candidates;
+        double gain_sum = 0.0;
+        for (std::size_t j = 0; j < data.features.size(); ++j) {
+            if (!available[j]) {
+                continue;
+            }
+            Split split;
+            if (data.features[j].kind == Kind::continuous) {
+                split = continuous_split(data, rows, j, weight);
+            } else {
+                split = discrete_split(data, rows, j, weight);
+            }
+            if (split.gain > epsilon && split.split_info > epsilon) {
+                gain_sum += split.gain;
+                candidates.push_back(std::move(split));
+            }
+        }
+        if (candidates.empty()) {
+            return std::nullopt;
+        }
+        const double average_gain = gain_sum / static_cast<double>(candidates.size());
+        std::optional<Split> best;
+        double best_ratio = -1.0;
+        // 先过滤低于平均增益的候选，防止极小分母让低收益分裂胜出。
+        for (const auto &split : candidates) {
+            const double ratio = split.gain / split.split_info;
+            if (split.gain + epsilon >= average_gain && ratio > best_ratio + epsilon) {
+                best = split;
+                best_ratio = ratio;
+            }
+        }
+        return best;
+    }
+
+    static std::optional<std::size_t> branch_for(const Cell &value, double threshold,
+                                                 const std::vector<std::string> &categories) {
+        if (const auto *number = std::get_if<double>(&value)) {
+            return *number <= threshold ? 0 : 1;
+        }
+        if (const auto *category = std::get_if<std::string>(&value)) {
+            const auto found = std::lower_bound(categories.begin(), categories.end(), *category);
+            if (found != categories.end() && *found == *category) {
+                return static_cast<std::size_t>(found - categories.begin());
+            }
+        }
+        return std::nullopt; // 缺失值，或训练时未见过的类别
+    }
+
+    std::unique_ptr<Node> build(const Dataset &data, const std::vector<WeightedRow> &rows,
+                                std::vector<bool> available, std::size_t depth) const {
+        auto node = std::make_unique<Node>();
+        node->counts.assign(data.labels.size(), 0.0);
+        for (const auto &row : rows) {
+            node->counts[data.rows[row.index].label] += row.weight;
+        }
+        const double weight = total(node->counts);
+        if (depth >= options_.max_depth || weight < 2 * options_.min_leaf_weight ||
+            entropy(node->counts) <= epsilon) {
+            return node;
+        }
+        // 先判断停止条件，再选分裂；没有正增益时保留多数类叶子。
+        const auto split = find_split(data, rows, available, weight);
+        if (!split) {
+            return node;
+        }
+        node->feature = split->feature;
+        node->threshold = split->threshold;
+        node->categories = split->categories;
+        const double known = total(split->weights);
+        for (double branch_weight : split->weights) {
+            node->priors.push_back(branch_weight / known);
+        }
+        std::vector<std::vector<WeightedRow>> partitions(node->priors.size());
+        for (const auto &row : rows) {
+            const auto branch = branch_for(data.rows[row.index].values[split->feature],
+                                           split->threshold, split->categories);
+            if (branch) {
+                partitions[*branch].push_back(row);
+            } else {
+                // 缺失样本按已知分支比例分配，所有分支的权重之和保持不变。
+                for (std::size_t j = 0; j < partitions.size(); ++j) {
+                    partitions[j].push_back({row.index, row.weight * node->priors[j]});
+                }
+            }
+        }
+        // 离散特征已经按所有类别分支，不再复用；连续特征仍可继续分裂。
+        if (data.features[split->feature].kind == Kind::discrete) {
+            available[split->feature] = false;
+        }
+        for (const auto &partition : partitions) {
+            node->children.push_back(build(data, partition, available, depth + 1));
+        }
+        return node;
+    }
+
+    // 估计叶子的错误次数上界：零误差修正、少于一次错误时插值，
+    // 其余情况用带连续性修正的 Wilson 上界。
+    double estimated_errors(double n, double errors) const {
+        // n 是样本总权重。zero_errors 是观测到零次错误时的错误次数上界。
+        const double zero_errors = n * -std::expm1(std::log(options_.confidence) / n);
+        if (errors < 1.0) {
+            if (n <= 1.0) {
+                return std::min(n, zero_errors + errors * (n - zero_errors));
+            }
+            return zero_errors + errors * (estimated_errors(n, 1.0) - zero_errors);
+        }
+        if (errors + 0.5 >= n) {
+            return n;
+        }
+        // 求单侧正态分位数 z：P(Z > z) = confidence。
+        double lo = 0.0;
+        double hi = 8.0;
+        for (int i = 0; i < 60; ++i) {
+            const double mid = std::midpoint(lo, hi);
+            if (0.5 * std::erfc(mid / std::sqrt(2.0)) > options_.confidence) {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        const double z = std::midpoint(lo, hi);
+        const double z2 = z * z;
+        // 加 0.5 做连续性修正，然后代入 Wilson 上界。
+        const double f = (errors + 0.5) / n;
+        return n * (f + z2 / (2 * n) + z * std::sqrt(f * (1 - f) / n + z2 / (4 * n * n))) /
+               (1 + z2 / n);
+    }
+
+    double prune(Node &node) const {
+        const double n = total(node.counts);
+        const double errors = n - *std::max_element(node.counts.begin(), node.counts.end());
+        const double leaf_errors = estimated_errors(n, std::max(0.0, errors));
+        if (node.is_leaf()) {
+            return leaf_errors;
+        }
+        double subtree_errors = 0.0;
+        for (auto &child : node.children) {
+            subtree_errors += prune(*child);
+        }
+        // 若多数类叶子的估计错误更少，就释放子树并替换为叶子。
+        if (leaf_errors <= subtree_errors + epsilon) {
+            node.feature.reset();
+            node.children.clear();
+            node.categories.clear();
+            node.priors.clear();
+            return leaf_errors;
+        }
+        return subtree_errors;
+    }
+
+    std::vector<double> predict_at(const Node &node, std::span<const Cell> values) const {
+        if (node.is_leaf()) {
+            auto probabilities = node.counts;
+            const double n = total(probabilities);
+            for (double &probability : probabilities) {
+                probability /= n;
+            }
+            return probabilities;
+        }
+        const auto branch = branch_for(values[*node.feature], node.threshold, node.categories);
+        if (branch) {
+            return predict_at(*node.children[*branch], values);
+        }
+        // 无法确定分支时，按训练时的分支比例混合所有子树的概率。
+        std::vector<double> probabilities(node.counts.size(), 0.0);
+        for (std::size_t j = 0; j < node.children.size(); ++j) {
+            const auto child = predict_at(*node.children[j], values);
+            for (std::size_t k = 0; k < probabilities.size(); ++k) {
+                probabilities[k] += node.priors[j] * child[k];
+            }
+        }
+        return probabilities;
+    }
+
+    void print_node(std::ostream &out, const Node &node, const std::string &indent) const {
+        const auto majority = static_cast<std::size_t>(
+            std::max_element(node.counts.begin(), node.counts.end()) - node.counts.begin());
+        if (node.is_leaf()) {
+            out << indent << "=> " << labels_[majority] << " (weight=" << total(node.counts)
+                << ")\n";
+            return;
+        }
+        for (std::size_t j = 0; j < node.children.size(); ++j) {
+            out << indent << features_[*node.feature].name;
+            if (node.categories.empty()) {
+                out << (j == 0 ? " <= " : " > ")
+                    << std::setprecision(std::numeric_limits<double>::max_digits10)
+                    << node.threshold;
+            } else {
+                out << " = " << node.categories[j];
+            }
+            out << '\n';
+            print_node(out, *node.children[j], indent + "  ");
+        }
+    }
 };
 
-string TreeCls::Temp_TestTree(vector < string > Kinds, vector < string > Attributes, vector < string > Value, vector < string > Score_Range)
-{
-  for(int i = 0; i < Score_Range.size(); i++)
-  {
-    if(this->Node.compare(Score_Range[i]) == 0)
-    {
-      return this->Node;
+} // namespace c45
+
+// 3. 单机评测与命令行演示
+namespace {
+using Clock = std::chrono::steady_clock;
+
+struct Shape {
+    std::size_t leaves = 0;
+    std::size_t depth = 0;
+};
+
+Shape shape(const c45::Node &node) {
+    if (node.is_leaf()) {
+        return {1, 0};
     }
-  }
+    Shape result;
+    for (const auto &child : node.children) {
+        const auto below = shape(*child);
+        result.leaves += below.leaves;
+        result.depth = std::max(result.depth, below.depth + 1);
+    }
+    return result;
+}
 
-  for(int i = 0; i < Attributes.size(); i++)
-  {
-    if(this->Node.compare(Attributes[i]) == 0)
-    {
-      if(Kinds[i].compare("Discrete") == 0)
-      {
-        for(int j = 0; j < this->Child.size(); j++)
-        {
-          if((this->Child[j])->Branch.compare(Value[i]) == 0)
-          {
-            for(int k = 0; k < Score_Range.size(); k++)
-            {
-              if((this->Child[j])->Node.compare(Score_Range[k]) == 0)
-              {
-                return (this->Child[j])->Node;
-              }
-            }
+double mean(const std::vector<double> &values) {
+    return std::accumulate(values.begin(), values.end(), 0.0) / static_cast<double>(values.size());
+}
 
-            vector < string > New_Kinds;
-            vector < string > New_Attributes;
-            vector < string > New_Value;
-            for(int l = 0; l < Attributes.size(); l++)
-            {
-              if( l != i)
-              {
-                New_Kinds.push_back(Kinds[l]);
-                New_Attributes.push_back(Attributes[l]);
-                New_Value.push_back(Value[l]);
-              }
-            }
-            return (this->Child[j])->Temp_TestTree(New_Kinds, New_Attributes, New_Value, Score_Range);
-          }
+double deviation(const std::vector<double> &values) {
+    const double average = mean(values);
+    double sum = 0;
+    for (double value : values) {
+        sum += (value - average) * (value - average);
+    }
+    return std::sqrt(sum / static_cast<double>(values.size()));
+}
+
+double median(std::vector<double> values) {
+    std::sort(values.begin(), values.end());
+    const auto mid = values.size() / 2;
+    return values.size() % 2 ? values[mid] : std::midpoint(values[mid - 1], values[mid]);
+}
+
+using Confusion = std::vector<std::vector<std::size_t>>;
+
+double macro_f1(const Confusion &matrix) {
+    double sum = 0;
+    for (std::size_t k = 0; k < matrix.size(); ++k) {
+        std::size_t actual = 0;
+        std::size_t predicted = 0;
+        for (std::size_t j = 0; j < matrix.size(); ++j) {
+            actual += matrix[k][j];
+            predicted += matrix[j][k];
         }
-      }
+        if (actual + predicted) {
+            sum +=
+                2.0 * static_cast<double>(matrix[k][k]) / static_cast<double>(actual + predicted);
+        }
+    }
+    return sum / static_cast<double>(matrix.size());
+}
 
-      else if(Kinds[i].compare("Continuous") == 0)
-      {
-        string Threshold = (this->Child[0])->Branch;
-        Threshold.erase(remove(Threshold.begin(), Threshold.begin()+3, '<'), Threshold.begin()+3);
-        Threshold.erase(remove(Threshold.begin(), Threshold.begin()+3, ' '), Threshold.begin()+3);
-        if(stod(Value[i]) - stod(Threshold) < -1.e-8)
-        {
-          for(int k = 0; k < Score_Range.size(); k++)
-          {
-            if((this->Child[0])->Node.compare(Score_Range[k]) == 0)
-            {
-              return (this->Child[0])->Node;
+// 固定 Fisher–Yates 洗牌的取样方式，使划分不受标准库实现差异影响。
+// 丢弃不能均分到 i 组的末端随机数，避免直接取模带来的偏差。
+void shuffle(std::vector<std::size_t> &values, std::mt19937 &random) {
+    for (std::size_t i = values.size(); i > 1; --i) {
+        const std::uint64_t range = std::uint64_t{1} << 32;
+        const std::uint64_t limit = range - range % i;
+        std::uint64_t value;
+        do {
+            value = random();
+        } while (value >= limit);
+        std::swap(values[i - 1], values[static_cast<std::size_t>(value % i)]);
+    }
+}
+
+std::vector<std::vector<std::size_t>> stratified_folds(const c45::Dataset &data,
+                                                       std::uint32_t seed) {
+    constexpr std::size_t count = 5;
+    std::vector<std::vector<std::size_t>> groups(data.labels.size());
+    std::vector<std::vector<std::size_t>> folds(count);
+    for (std::size_t i = 0; i < data.rows.size(); ++i) {
+        groups[data.rows[i].label].push_back(i);
+    }
+    std::mt19937 random(seed);
+    std::size_t offset = 0;
+    for (auto &group : groups) {
+        if (group.size() < count) {
+            throw std::invalid_argument("5-fold evaluation requires at least 5 samples per class");
+        }
+        shuffle(group, random);
+        for (std::size_t i = 0; i < group.size(); ++i) {
+            folds[(offset + i) % count].push_back(group[i]);
+        }
+        offset = (offset + group.size()) % count;
+    }
+    return folds;
+}
+
+void benchmark(const std::string &path) {
+    constexpr std::size_t repeats = 5;
+    constexpr std::size_t prediction_rounds = 50;
+    const auto data = c45::load_dataset(path);
+    for (bool pruning : {false, true}) {
+        c45::Options options;
+        options.pruning = pruning;
+        std::vector<double> accuracies, f1s;
+        std::vector<double> baselines, baseline_f1s;
+        std::vector<double> fit_times, predict_times;
+        std::vector<double> leaves;
+        std::size_t max_depth = 0;
+        for (std::uint32_t repeat = 0; repeat < repeats; ++repeat) {
+            const auto folds = stratified_folds(data, 2026 + repeat);
+            Confusion confusion(data.labels.size(),
+                                std::vector<std::size_t>(data.labels.size(), 0));
+            Confusion baseline_confusion = confusion;
+            std::size_t correct = 0;
+            std::size_t baseline_correct = 0;
+            std::size_t tested = 0;
+            std::vector<bool> evaluated(data.rows.size(), false);
+            for (std::size_t fold = 0; fold < folds.size(); ++fold) {
+                std::vector<std::size_t> train;
+                for (std::size_t j = 0; j < folds.size(); ++j) {
+                    if (j != fold) {
+                        train.insert(train.end(), folds[j].begin(), folds[j].end());
+                    }
+                }
+                std::vector<std::size_t> counts(data.labels.size(), 0);
+                for (auto index : train) {
+                    ++counts[data.rows[index].label];
+                }
+                const auto majority = static_cast<std::size_t>(
+                    std::max_element(counts.begin(), counts.end()) - counts.begin());
+                // 预热不计时；正式计时只包含 fit，不包含读取和划分。
+                {
+                    c45::DecisionTree warmup(options);
+                    warmup.fit(data, train);
+                }
+                c45::DecisionTree tree(options);
+                const auto begin = Clock::now();
+                tree.fit(data, train);
+                const auto end = Clock::now();
+                fit_times.push_back(std::chrono::duration<double, std::milli>(end - begin).count());
+                const auto dimensions = shape(tree.root());
+                leaves.push_back(static_cast<double>(dimensions.leaves));
+                max_depth = std::max(max_depth, dimensions.depth);
+                // 每条样本在本次重复中恰好测试一次；指标由全部折外预测合并计算。
+                for (auto index : folds[fold]) {
+                    if (evaluated[index] ||
+                        std::find(train.begin(), train.end(), index) != train.end()) {
+                        throw std::logic_error("cross-validation overlap");
+                    }
+                    evaluated[index] = true;
+                    const auto &row = data.rows[index];
+                    const auto prediction = tree.predict(row.values);
+                    ++confusion[row.label][prediction];
+                    ++baseline_confusion[row.label][majority];
+                    correct += prediction == row.label;
+                    baseline_correct += majority == row.label;
+                    ++tested;
+                }
+                // 多次预测摊薄计时开销；保留校验和，避免编译器删除计算。
+                std::size_t checksum = 0;
+                const auto prediction_begin = Clock::now();
+                for (std::size_t round = 0; round < prediction_rounds; ++round) {
+                    for (auto index : folds[fold]) {
+                        checksum += tree.predict(data.rows[index].values);
+                    }
+                }
+                const auto prediction_end = Clock::now();
+                static volatile std::size_t prediction_sink = 0;
+                prediction_sink = checksum;
+                (void)prediction_sink;
+                predict_times.push_back(
+                    std::chrono::duration<double, std::micro>(prediction_end - prediction_begin)
+                        .count() /
+                    static_cast<double>(prediction_rounds * folds[fold].size()));
             }
-          }
-          return (this->Child[0])->Temp_TestTree(Kinds, Attributes, Value, Score_Range);
-        }
-        else if(stod(Value[i]) - stod(Threshold) > 1.e-8)
-        {
-          for(int k = 0; k < Score_Range.size(); k++)
-          {
-            if((this->Child[1])->Node.compare(Score_Range[k]) == 0)
-            {
-              return (this->Child[1])->Node;
+            if (tested != data.rows.size()) {
+                throw std::logic_error("cross-validation did not cover every row");
             }
-          }
-          return (this->Child[1])->Temp_TestTree(Kinds, Attributes, Value, Score_Range);
+            accuracies.push_back(static_cast<double>(correct) / static_cast<double>(tested));
+            baselines.push_back(static_cast<double>(baseline_correct) /
+                                static_cast<double>(tested));
+            f1s.push_back(macro_f1(confusion));
+            baseline_f1s.push_back(macro_f1(baseline_confusion));
         }
-      }
+        std::cout << std::filesystem::path(path).stem().string() << ',' << data.rows.size() << ','
+                  << data.features.size() << ',' << data.labels.size() << ','
+                  << (pruning ? "pruned" : "unpruned") << ",5,5,2026," << std::fixed
+                  << std::setprecision(6) << mean(accuracies) << ',' << deviation(accuracies) << ','
+                  << mean(f1s) << ',' << deviation(f1s) << ',' << mean(baselines) << ','
+                  << mean(baseline_f1s) << ',' << median(fit_times) << ',' << median(predict_times)
+                  << ',' << mean(leaves) << ',' << max_depth << '\n';
     }
-  }
 }
 
-vector < string > TreeCls::TestTree(MatrixCls Data_Matrix)
-{
-
-  int Lines_Number = Data_Matrix.SizeY() - 2;
-  vector < string > Test_Scores;
-  int i, j, k, l, m;
-  vector < string > Kinds = Data_Matrix.GetVarKinds();
-  vector < string > Attributes = Data_Matrix.GetAttributes();
-  vector < string > Attributes_Value;
-  vector < string > Score_Range = UniqueValues(Data_Matrix.GetScores());
-
-  for(i = 0; i < Lines_Number; i++)
-  {
-
-    for(j = 0; j < Data_Matrix.SizeX() - 1; j++)
-    {
-      Attributes_Value.push_back(Data_Matrix.Element((i+2),j));
+int demo(const std::string &path, bool pruning) {
+    const auto data = c45::load_dataset(path);
+    c45::Options options;
+    options.pruning = pruning;
+    c45::DecisionTree tree(options);
+    tree.fit(data);
+    tree.print(std::cout);
+    std::size_t correct = 0;
+    std::cout << "\nrow,actual,predicted,predicted_probability\n";
+    for (std::size_t i = 0; i < data.rows.size(); ++i) {
+        const auto probabilities = tree.predict_proba(data.rows[i].values);
+        const auto prediction = static_cast<std::size_t>(
+            std::max_element(probabilities.begin(), probabilities.end()) - probabilities.begin());
+        correct += prediction == data.rows[i].label;
+        std::cout << i + 1 << ',' << data.labels[data.rows[i].label] << ','
+                  << data.labels[prediction] << ',' << std::fixed << std::setprecision(6)
+                  << probabilities[prediction] << '\n';
     }
-
-    string Temp_Score;
-    Temp_Score = Temp_TestTree(Kinds, Attributes, Attributes_Value, Score_Range);
-    Test_Scores.push_back(Temp_Score);
-    Attributes_Value.erase(Attributes_Value.begin(),Attributes_Value.end());
-  }
-  return Test_Scores;
+    std::cout << "Training accuracy (not a generalization estimate): " << correct << '/'
+              << data.rows.size() << '\n';
+    return 0;
 }
 
-TreeCls::TreeCls()
-{
-  Node = "";
-  Branch = "";
+void usage() {
+    std::cout << "Usage:\n  c45 [dataset.dat] [--no-prune]\n"
+                 "  c45 --benchmark dataset.dat [dataset.dat ...]\n"
+                 "  c45 --help\n\nDefault dataset: Golf.dat relative to the working directory.\n"
+                 "Benchmark: stratified 5-fold CV, 5 repeats, seeds 2026..2030; CSV on stdout.\n";
 }
+} // namespace
 
-TreeCls * TreeCls::BuildTree(TreeCls * Tree, MatrixCls Remain_Matrix)
-{
-  if(Tree == NULL)
-  {
-    Tree = new TreeCls();
-  }
-
-  vector < string > Unique_Scores = UniqueValues(Remain_Matrix.GetScores());
-  if(Unique_Scores.size() == 1)
-  {
-    Tree->Node = Unique_Scores[0];
-    return Tree;
-  }
-
-  //vector < string > Scores = Remain_Matrix.GetScores();
-  //if(Scores.size() <= 5)
-  //{
-  //  Tree->Node = FrequentValues(Scores);
-  //  return Tree;
-  //}
-
-  double Gain_Ratio = 0, Entropy_Gain = 0;
-  double Temp_Gain_Ratio, Temp_Entropy_Gain;
-  string Max_Attribute;
-  string Max_Bisect_Node = "";
-  int Max_Attribute_Index = 0;
-  //string Max_Bisect_Node_Index = 0;
-  vector < string > Attributes = Remain_Matrix.GetAttributes();
-  vector < string > Kinds = Remain_Matrix.GetVarKinds();
-  int i, j;
-  for(i = 0; i < Attributes.size(); i++)
-  {
-    if(Kinds[i].compare("Discrete") == 0)
-    {
-      Temp_Gain_Ratio = GainRatio(Remain_Matrix,Attributes[i]);
-    }
-    else if(Kinds[i].compare("Continuous") == 0)
-    {
-      vector < string > Bisect_Nodes = Remain_Matrix.GetBisectNodes(Attributes[i]);
-      for(j = 0; j < Bisect_Nodes.size(); j++)
-      {
-        Temp_Entropy_Gain = ComputeAttributeEntropyGain(Remain_Matrix,Attributes[i],Bisect_Nodes[j]);
-        if(Temp_Entropy_Gain - Entropy_Gain > 1.e-8 )
-        {
-          Entropy_Gain = Temp_Entropy_Gain;
-          Max_Bisect_Node = Bisect_Nodes[j];
+// 测试复用本文件，只替换 main，避免复制算法或另外维护测试接口。
+#ifndef C45_TESTING
+int main(int argc, char *argv[]) {
+    try {
+        if (argc > 1 && std::string(argv[1]) == "--help") {
+            if (argc != 2) {
+                throw std::invalid_argument("--help takes no additional arguments");
+            }
+            usage();
+            return 0;
         }
-      }
-      Temp_Gain_Ratio = GainRatio(Remain_Matrix,Attributes[i], Max_Bisect_Node);
+        if (argc > 1 && std::string(argv[1]) == "--benchmark") {
+            if (argc < 3) {
+                throw std::invalid_argument("--benchmark needs at least one dataset");
+            }
+            std::cout << "dataset,n,features,classes,model,folds,repeats,seed,accuracy_mean,"
+                         "accuracy_sd,macro_f1_mean,macro_f1_sd,"
+                         "majority_accuracy,majority_macro_f1,fit_ms_median,predict_us_per_row_"
+                         "median,leaves_mean,depth_max\n";
+            for (int i = 2; i < argc; ++i) {
+                benchmark(argv[i]);
+            }
+            return 0;
+        }
+        std::string path = "Golf.dat";
+        bool pruning = true;
+        bool path_set = false;
+        for (int i = 1; i < argc; ++i) {
+            const std::string arg = argv[i];
+            if (arg == "--no-prune") {
+                pruning = false;
+            } else if (arg.starts_with("--") || path_set) {
+                throw std::invalid_argument("invalid argument: " + arg);
+            } else {
+                path = arg;
+                path_set = true;
+            }
+        }
+        return demo(path, pruning);
+    } catch (const std::exception &error) {
+        std::cerr << "error: " << error.what() << '\n';
+        return 1;
     }
-
-    if(Temp_Gain_Ratio - Gain_Ratio > 1.e-8)
-    {
-      Gain_Ratio = Temp_Gain_Ratio;
-      Max_Attribute = Attributes[i];
-      Max_Attribute_Index = i;
-    }
-  }
-
-  Tree->Node = Max_Attribute;
-  vector < string > Values, Branch_Values;
-  if(Kinds[Max_Attribute_Index].compare("Discrete") == 0)
-  {
-    Values = Remain_Matrix.GetUniqueAttributeValues(Max_Attribute);
-    Branch_Values = Values;
-  }
-  else if(Kinds[Max_Attribute_Index].compare("Continuous") == 0)
-  {
-    Values = {"Lower_Values", "Upper_Values"};
-    string Left_Branch = "< " + Max_Bisect_Node;
-    string Right_Branch = "> " + Max_Bisect_Node;
-    Branch_Values = {Left_Branch, Right_Branch};
-  }
-
-  int k;
-  MatrixCls New_Matrix;
-  for(k = 0; k < Values.size(); k++)
-  {
-    New_Matrix = New_Matrix.operator()(Remain_Matrix, Max_Attribute, Values[k], Max_Bisect_Node);
-    TreeCls * New_Tree = new TreeCls();
-    New_Tree->Branch = Branch_Values[k];
-    vector < string > New_Unique_Scores = UniqueValues(New_Matrix.GetScores());
-    if(New_Unique_Scores.size() == 1)
-    {
-      New_Tree->Node = New_Unique_Scores[0];
-    }
-    else
-    {
-      BuildTree(New_Tree, New_Matrix);
-    }
-    Tree->Child.push_back(New_Tree);
-  }
-  return Tree;
 }
-
-void TreeCls::Display(int Depth = 0)
-{
-  for(int i = 0; i < Depth; i++)
-  {
-    cout << "\t";
-  }
-  if(this->Branch.compare("") != 0)
-  {
-    cout << this->Branch << endl;
-    for(int i = 0; i < Depth+1; i++)
-    {
-      cout << "\t";
-    }
-  }
-  cout << this->Node << endl;
-  for(int i = 0; i < this->Child.size(); i++)
-  {
-    (this->Child[i])->Display(Depth + 1);
-  }
-}
-
-void DisplayVector(vector < string > The_Vector)
-{
-  for(int i = 0; i < The_Vector.size(); i++)
-  {
-    cout << The_Vector[i] << "\n" ;
-  }
-  cout << endl;
-}
-
-int main()
-{
-  MatrixCls Matrix("Golf.dat");
-  TreeCls * Tree;
-  Tree = Tree->BuildTree(Tree, Matrix);
-  Tree->Display();
-  vector < string > Test_Scores = Tree->TestTree(Matrix);
-  DisplayVector(Test_Scores);
-  vector < string > Test_String = {"a","b","c","d"};
-  DisplayVector(Test_String);
-  Test_String.erase(Test_String.begin()+0);
-  //cout << sizeof(Test_String.begin()) << endl;
-  DisplayVector(Test_String);
-}
+#endif

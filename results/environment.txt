@@ -1,0 +1,19 @@
+Date (Asia/Shanghai): 2026-10-23T20:52:04+08:00
+OS: Debian GNU/Linux 13 (trixie), x86_64
+CPU: AMD EPYC 9V74 80-Core Processor; 5 vCPUs exposed to the cloud container
+Compiler: g++ (Debian 14.2.0-19) 14.2.0
+Build: g++ -std=c++20 -Wall -Wextra -Wpedantic -Wconversion -Wshadow -O2 -g DecisionTree_C4.5.cpp -o build/c45
+Command: ./build/c45 --benchmark data/iris.dat data/wine.dat data/breast_cancer.dat
+Execution: one thread, no CPU pinning, after build/sanitizer completion; shared virtualized host
+Evaluation: 5 stratified folds x 5 repeats; seeds 2026..2030; defaults, no parameter search
+Each model: 25 timed fits after untimed warmup fits; 50 prediction loops per fold; report fold-time medians
+Accuracy/F1 standard deviations: population SD across 5 full out-of-fold repeat results, not confidence intervals
+Readability refactor: all nontiming fields match the preceding recorded benchmark
+Source checkout base: 2644b9266999dbba85427189fbbe1f6026a45913; benchmark uses modified working tree
+
+SHA-256 of evaluated source/data:
+81315f3a4e58a73d380f72b17b7748074dbf5c6ce7d6c1e40d14aa48230e124c  DecisionTree_C4.5.cpp
+85311342e1bc7c24a75e6106eb7f4cd949420457a19f8b6b64bc544e70803fac  Makefile
+3be376aba07caba824504499743be958e10ac83d322751239ddd617c6b0df3fb  data/iris.dat
+2ecea4011aab0b12ad6dc25639157d8b32f21c9afedf691a87eaf1a88979935a  data/wine.dat
+c7fdbd88831a6343b9c637be54c65b15fc20641db589d009bdd11c4d4f06b1eb  data/breast_cancer.dat
