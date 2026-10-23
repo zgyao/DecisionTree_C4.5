@@ -1,0 +1,13 @@
+name: C++ checks
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build, test and check memory safety
+        run: ./scripts/setup.sh --sanitize
+      - name: Exercise all benchmark datasets
+        run: make benchmark
